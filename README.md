@@ -1,2 +1,2 @@
-ipk-2013-project-1
+IPK 2013 Project 1
 ==================
