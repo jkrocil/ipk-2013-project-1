@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 
@@ -18,8 +21,15 @@
 #define FTP_ERROR 1
 #define STR_BUFF_SIZE 4096
 
+
+ // globals
 int DEBUG = 0;
 
+struct timeval TIMEOUT = {
+  .tv_sec = 10,
+  .tv_usec = 0
+};
+// --------
 
 struct parsed_url {
   // [ftp://[user:password@]]host[:21][/path/to][/]
@@ -199,6 +209,9 @@ int ftp_connect(char *hostname, int port, struct ftp_connection *conn) {
   if ((conn->socket = socket(PF_INET, SOCK_STREAM, 0)) < 0)
     return ftp_perror();
 
+  if (setsockopt (conn->socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&TIMEOUT, sizeof(TIMEOUT)) < 0)
+    return ftp_perror();
+
   conn->sock_in.sin_family = PF_INET;
   conn->pasv_sock_in.sin_family = PF_INET;
   conn->sock_in.sin_port = htons(port);
@@ -229,14 +242,14 @@ int ftp_login(char *username, char *password, struct ftp_connection *conn) {
     password = "";
   }
 
-  sprintf(str_buff, "USER %s\n", username);
+  sprintf(str_buff, "USER %s\r\n", username);
 
   if (write_and_read(conn->socket, str_buff) != 0)
     return ftp_perror();
   if (str_buff[0] != '3') // 331
     return ftp_perror();
 
-  sprintf(str_buff, "PASS %s\n", password);
+  sprintf(str_buff, "PASS %s\r\n", password);
 
   if (write_and_read(conn->socket, str_buff) != 0)
     return ftp_perror();
@@ -249,7 +262,7 @@ int ftp_login(char *username, char *password, struct ftp_connection *conn) {
 
 int ftp_set_passive_mode(struct ftp_connection *conn) {
   char str_buff[STR_BUFF_SIZE] = "";
-  strcpy(str_buff, "PASV\n");
+  strcpy(str_buff, "PASV\r\n");
 
   if (write_and_read(conn->socket, str_buff) != 0)
     return ftp_perror();
@@ -272,13 +285,16 @@ int ftp_list(char *path, struct ftp_connection *conn) {
   int passive_socket;
   int read_ret = 0;
 
-  sprintf(str_buff, "LIST %s\n", path);
+  sprintf(str_buff, "LIST %s\r\n", path);
 
   if (DEBUG) printf("%s", str_buff);
   if (write(conn->socket, str_buff, strlen(str_buff)) < 0)
     return ftp_perror();
 
   if ((passive_socket = socket(PF_INET, SOCK_STREAM, 0)) < 0)
+    return ftp_perror();
+   
+  if (setsockopt (passive_socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&TIMEOUT, sizeof(TIMEOUT)) < 0)
     return ftp_perror();
 
   if (DEBUG) printf("Connecting to port %d\n", ntohs(conn->pasv_sock_in.sin_port));
@@ -308,7 +324,7 @@ int ftp_list(char *path, struct ftp_connection *conn) {
 
 int ftp_disconnect(struct ftp_connection *conn) {
   char str_buff[STR_BUFF_SIZE] = "";
-  strcpy(str_buff, "QUIT\n");
+  strcpy(str_buff, "QUIT\r\n");
 
   if (write_and_read(conn->socket, str_buff) != 0)
     return ftp_perror();
